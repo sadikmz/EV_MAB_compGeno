@@ -1,0 +1,402 @@
+---
+title: "reads_coverage_go_terms"
+author: "Sadik M"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load GO-terms annotation of Enset and Musa spp proteins 
+```{r}
+
+load("~/Downloads/OrthoFinder.EV.AED25.MAB.RData")
+load("~/Downloads/OrthoFinder.EV.AED25.MAB.monocot.RData")
+
+save(GO_terms_EV_AED25_MAB_v2,file = "GO_terms_EV_AED25_MAB_v2.RData")
+save(GO_terms_EV_AED25_MAB_desc.v1,file = "GO_terms_EV_AED25_MAB_desc.v1.RData")
+
+
+```
+
+## Get gene IDs from annotation files and link with reads coverage across geneic regions and GO-term annotation
+```{r}
+# library(rtracklayer)
+
+EV_MAB_genes <- list()
+
+
+for (EACH_GFF_ANNOTATION in list.files(path = DATA_DIR, pattern = "gff3")){
+  
+  BASENAME <- basename(EACH_GFF_ANNOTATION) %>% str_remove(".gff3") %>% str_remove("EV_")
+
+  read_gff <-
+    rtracklayer::readGFF(paste0(DATA_DIR,EACH_GFF_ANNOTATION)) %>%
+  as.data.frame() %>%
+  dplyr::filter(type =='gene') %>%
+  select(seqid,start,end,Name) %>%
+    mutate(genome = BASENAME)
+
+    EV_MAB_genes [[EACH_GFF_ANNOTATION]] <- read_gff # add it to your list
+
+  
+}
+
+rm(read_gff)
+
+EV_MAB_genes =
+    do.call(rbind, EV_MAB_genes) %>%
+  mutate(genome = str_remove(genome,".maker.annotation"))
+
+
+# remove rownames 
+rownames(EV_MAB_genes) <- NULL
+
+
+# combine gene ID and reads coverage 
+EV_MAB_reads_coverage_geneID <-
+EV_MAB_genes %>% 
+mutate(start = start -1) %>%
+  left_join(
+    EV_MAB_reads_coverage %>%
+      mutate(
+        
+        reads_genome = str_replace_na(reads_genome, "NA"),
+             start = as.numeric(start),
+             end = as.numeric(end),
+        genome = case_when(ref_genome=="musa_balbisiana" ~ "Musa_balbisiana",
+                       ref_genome=="musa_acuminata" ~ "Musa_acuminata",
+                       ref_genome=="ev_mazia" ~ "mazia",
+                       ref_genome=="ev_bedadeti" ~ "bedadeti")) %>%
+      dplyr::rename(seqid=seq.name)) 
+  # filter(start==185298)
+
+```
+
+
+## add IntreProScan GO-terms annotation 
+```{r}
+
+EV_MAB_reads_coverage_geneID_GO_terms <-
+  EV_MAB_reads_coverage_geneID %>%
+  # rename gene ID of Musa acuminata (MA) and Musa balbisiana (MB) to match it with gene ID used in GO-terms analysis
+  # Simple add a suffix of ".1" to each of MA and MB genes
+  mutate(Name = case_when(genome == "Musa_acuminata" |
+                            genome == "Musa_balbisiana" ~ str_c(Name,".1"),
+                          TRUE ~ Name)) %>%
+  dplyr::rename(genes=Name) %>%
+  # Join GO-terms annotation
+  left_join(
+    GO_terms_EV_AED25_MAB_v2 %>% 
+      mutate(genomes = str_remove(genomes,".AED25"),
+             genes = str_remove(genes,"-\\w+")) %>%
+      dplyr::rename(genome = genomes) %>%
+      distinct()) %>%
+  # filter(genome=="Musa_acuminata") %>% 
+  mutate(GO_terms = str_replace_na(GO_terms,"NA")) %>%
+  dplyr::rename(gene_id = genes)
+  # head() %>%
+  # filter(GO_terms != "NA")
+```
+
+
+## Filter EV and MAB specific genes 
+### EV mazia specific genes 
+```{r}
+EV_MAB_reads_coverage_geneID_GO_terms %>%
+  filter(ref_genome=="ev_mazia") %>%
+  filter(fraction_overlap < 0.25 ) %>%
+  head()
+```
+
+## update GO-terms annotation for non-syntenic genes
+
+```{r}
+
+# combine gene ID and reads coverage 
+
+# EV_MAB_reads_coverage_geneID_synteny <-
+# EV_MAB_genes %>% 
+# mutate(start = start -1) %>%
+#   left_join(
+#     EV_MAB_reads_coverage_no_lastz_nucmer_alignment %>%
+#   # filter(synteny=="non_syntenic") %>%
+#       mutate(
+#         genome = case_when(ref_genome=="musa_balbisiana" ~ "Musa_balbisiana",
+#                        ref_genome=="musa_acuminata" ~ "Musa_acuminata",
+#                        ref_genome=="ev_mazia" ~ "mazia",
+#                        ref_genome=="ev_bedadeti" ~ "bedadeti")) %>%
+#       dplyr::rename(seqid=seq.name)) %>%
+#       mutate(V4 = str_replace_na(V4,'NA')) 
+
+EV_MAB_reads_coverage_geneID_synteny <-
+    EV_MAB_reads_coverage_no_lastz_nucmer_alignment %>%
+  # filter(synteny=="non_syntenic") %>%
+      mutate(
+        genome = case_when(ref_genome=="musa_balbisiana" ~ "Musa_balbisiana",
+                       ref_genome=="musa_acuminata" ~ "Musa_acuminata",
+                       ref_genome=="ev_mazia" ~ "mazia",
+                       ref_genome=="ev_bedadeti" ~ "bedadeti")) %>%
+      dplyr::rename(seqid=seq.name) %>%
+  left_join(
+    EV_MAB_genes %>% 
+      mutate(start = start -1)) %>%
+      mutate(V4 = str_replace_na(V4,'NA')) 
+    
+
+
+EV_MAB_reads_coverage_geneID_GO_terms_synteny <-
+  EV_MAB_reads_coverage_geneID_synteny %>%
+  # rename gene ID of Musa acuminata (MA) and Musa balbisiana (MB) to match it with gene ID used in GO-terms analysis
+  # Simple add a suffix of ".1" to each of MA and MB genes
+  mutate(Name = case_when(genome == "Musa_acuminata" |
+                            genome == "Musa_balbisiana" ~ str_c(Name,".1"),
+                          TRUE ~ Name)) %>%
+  dplyr::rename(genes=Name) %>%
+  # Join GO-terms annotation
+  left_join(
+    GO_terms_EV_AED25_MAB_v2 %>% 
+      mutate(genomes = str_remove(genomes,".AED25"),
+             genes = str_remove(genes,"-\\w+")) %>%
+      dplyr::rename(genome = genomes) %>%
+      distinct()) %>%
+  mutate(GO_terms = str_replace_na(GO_terms,"NA")) %>%
+  dplyr::rename(gene_id = genes) %>%
+  mutate (V7 = str_replace_na(V7,"NA")) %>%
+  distinct()
+  # head() %>%
+  # filter(GO_terms != "NA")
+
+
+
+        
+      EV_MAB_reads_coverage_no_lastz_nucmer_alignment %>%
+                # filter(end=="125076") 
+      mutate(
+        genome = case_when(ref_genome=="musa_balbisiana" ~ "Musa_balbisiana",
+                       ref_genome=="musa_acuminata" ~ "Musa_acuminata",
+                       ref_genome=="ev_mazia" ~ "mazia",
+                       ref_genome=="ev_bedadeti" ~ "bedadeti")) %>%
+      dplyr::rename(seqid=seq.name) %>%
+                 filter(end=="125076") %>%
+
+  left_join(
+    EV_MAB_genes %>% 
+      mutate(start = start -1)) %>%
+      mutate(V4 = str_replace_na(V4,'NA')) 
+      
+      
+       EV_MAB_genes %>% 
+      mutate(start = start -1) %>%
+         filter(end=="125076") 
+
+     EV_MAB_reads_coverage_no_lastz_nucmer_alignment %>%
+       head()
+```
+
+
+```{r}
+
+# update data structure 
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v3 <-
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment %>% 
+  as.data.frame() %>%
+  filter(gene_repeat=="gene" ) %>% 
+  # filter(reads_used =="allMapped") %>%
+  select( seq.name, start,  end, ref_genome, reads_used, reads_genome, gene_repeat, query, group, fraction_overlap, syn_cov) %>%
+  mutate(syn_cov = str_replace_na(syn_cov,"NA")) %>%
+  filter(fraction_overlap >= 0.456) %>%
+  mutate(frac_ovrerlap_syn = fraction_overlap) %>%
+  distinct() %>%
+rbind(
+    
+  EV_MAB_reads_coverage_no_lastz_nucmer_alignment %>% 
+  as.data.frame() %>%
+  filter(gene_repeat=="gene") %>% 
+  # filter(reads_used =="allMapped") %>%
+  select(seq.name, start,  end, ref_genome, reads_used,reads_genome, gene_repeat, query, group, fraction_overlap, syn_cov) %>%
+  mutate(syn_cov = str_replace_na(syn_cov,"NA"),
+         syn_cov = as.numeric(syn_cov)) %>%
+  filter(fraction_overlap < 0.245, syn_cov >=0.245) %>%
+    mutate(frac_ovrerlap_syn = syn_cov),
+
+  
+    EV_MAB_reads_coverage_no_lastz_nucmer_alignment %>% 
+      as.data.frame() %>%
+      filter(gene_repeat=="gene") %>% 
+      # filter(reads_used =="allMapped") %>%
+      select(seq.name, start,  end, ref_genome, reads_used, reads_genome, gene_repeat, query, group, fraction_overlap, syn_cov) %>%
+      mutate(syn_cov = str_replace_na(syn_cov,"NA"),
+             syn_cov = as.numeric(syn_cov)) %>%
+      filter(fraction_overlap < 0.245, syn_cov <0.245) %>%
+      mutate(frac_ovrerlap_syn = fraction_overlap) 
+     ) %>%
+  filter(gene_repeat == "gene") %>%
+  select(-gene_repeat) %>%
+  distinct()
+  # head()
+
+
+# EV_MAB_reads_coverage %>% distinct(group)  %>% dput()
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v3 <- 
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v3 %>%
+  mutate(
+    query = case_when(str_detect(reads_genome,"A-sub") ~ "panMA_reads",
+                      str_detect(reads_genome,"B-sub") ~ "panMB_reads",
+                      str_detect(reads_genome,"S-sub") ~ "MS_LongReads",
+                      str_detect(reads_genome,"T-sub") ~ "MT_LongReads",
+                      TRUE ~ query))
+
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v3 <-
+  EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v3 %>%
+  mutate(
+    group = case_when(
+      str_detect(ref_genome, "musa_acuminata") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> MA genome",
+      str_detect(ref_genome, "musa_acuminata") &
+        str_detect(query, "panMA_reads") ~ "*Musa spp.* A-genome NGS reads vs <br> MA genome",
+      str_detect(ref_genome, "musa_balbisiana") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> MB genome",
+      str_detect(ref_genome, "musa_balbisiana") &
+        str_detect(query, "panMB_reads") ~ "*Musa spp.* B-genome NGS vs <br> MB genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "panMA_reads") ~ "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "panMB_reads") ~ "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "panMA_reads") ~ "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "panMB_reads") ~ "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "MS_LongReads") ~ "*MS long reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "MT_LongReads") ~ "*MT long reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "MS_LongReads") ~ "*MS long reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "MT_LongReads") ~ "*MT long reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "MT_LongReads") ~ "*MT long reads vs <br> EV (Bedadeti) genome"
+    )
+    
+  )
+  
+
+
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v3$group = factor(EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v3$group,
+                                     levels = c( 
+                                                "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Mazia) genome", 
+                                                "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Bedadeti) genome", 
+                                                "*E. ventricosum* NGS reads vs <br> MA genome", 
+                                                "*E. ventricosum* NGS reads vs <br> MB genome",
+                                                "*Musa spp.* A-genome NGS reads vs <br> MA genome", 
+                                                "*Musa spp.* B-genome NGS vs <br> MB genome", 
+                                                "*E. ventricosum* NGS reads vs <br> EV (Mazia) genome",
+                                                "*E. ventricosum* NGS reads vs <br> EV (Bedadeti) genome",
+                                                "*MS long reads vs <br> EV (Mazia) genome",
+                                                "*MT long reads vs <br> EV (Mazia) genome",
+                                                "*MS long reads vs <br> EV (Bedadeti) genome",
+                                                "*MT long reads vs <br> EV (Bedadeti) genome"))
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v3
+  head()
+# EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v3 <-
+# EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v3 %>% 
+#     as.data.frame() %>%
+#   filter(
+#     group !="*Musa spp.* A-genome NGS reads vs <br> MA genome",
+#     group !="*Musa spp.* B-genome NGS vs <br> MB genome",
+#     group !="*E. ventricosum* NGS reads vs <br> MA genome",
+#     group !="*E. ventricosum* NGS reads vs <br> MB genome"
+#     # !str_detect(group,"long reads")
+#   ) %>% 
+#   distinct() %>%
+#   filter(reads_used !="qfiltered") %>%
+#     group_by( seq.name, start,  end, ref_genome, group) %>%
+#     # group_by( seq.name, start,  end, ref_genome, reads_used, gene_repeat, query, group) %>%
+#   summarise(frac_ovrerlap_syn = max(frac_ovrerlap_syn)) %>%
+#   ungroup()
+```
+
+
+## update GO-terms annotation for non-syntenic genes
+
+```{r}
+
+# combine gene ID and reads coverage 
+
+
+EV_MAB_reads_coverage_geneID_synteny.v1 <-
+    EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v3 %>%
+  # filter(synteny=="non_syntenic") %>%
+      mutate(
+        genome = case_when(ref_genome=="musa_balbisiana" ~ "Musa_balbisiana",
+                       ref_genome=="musa_acuminata" ~ "Musa_acuminata",
+                       ref_genome=="ev_mazia" ~ "mazia",
+                       ref_genome=="ev_bedadeti" ~ "bedadeti")) %>%
+      dplyr::rename(seqid=seq.name) %>%
+  left_join(
+    EV_MAB_genes %>% 
+      mutate(start = start -1)) 
+
+
+EV_MAB_reads_coverage_geneID_GO_terms_synteny.v1 <-
+  EV_MAB_reads_coverage_geneID_synteny.v1 %>%
+  # rename gene ID of Musa acuminata (MA) and Musa balbisiana (MB) to match it with gene ID used in GO-terms analysis
+  # Simple add a suffix of ".1" to each of MA and MB genes
+  mutate(Name = case_when(genome == "Musa_acuminata" |
+                            genome == "Musa_balbisiana" ~ str_c(Name,".1"),
+                          TRUE ~ Name)) %>%
+  dplyr::rename(genes=Name) %>%
+  # Join GO-terms annotation
+  left_join(
+    GO_terms_EV_AED25_MAB_v2 %>% 
+      mutate(genomes = str_remove(genomes,".AED25"),
+             genes = str_remove(genes,"-\\w+")) %>%
+      dplyr::rename(genome = genomes) %>%
+      distinct()) %>%
+  mutate(GO_terms = str_replace_na(GO_terms,"NA")) %>%
+  dplyr::rename(gene_id = genes) %>%
+  # mutate (V7 = str_replace_na(V7,"NA")) %>%
+  distinct()
+  # head() %>%
+  # filter(GO_terms != "NA")
+
+
+
+        
+  #     EV_MAB_reads_coverage_no_lastz_nucmer_alignment %>%
+  #               # filter(end=="125076") 
+  #     mutate(
+  #       genome = case_when(ref_genome=="musa_balbisiana" ~ "Musa_balbisiana",
+  #                      ref_genome=="musa_acuminata" ~ "Musa_acuminata",
+  #                      ref_genome=="ev_mazia" ~ "mazia",
+  #                      ref_genome=="ev_bedadeti" ~ "bedadeti")) %>%
+  #     dplyr::rename(seqid=seq.name) %>%
+  #                filter(end=="125076") %>%
+  # 
+  # left_join(
+  #   EV_MAB_genes %>% 
+  #     mutate(start = start -1)) %>%
+  #     mutate(V4 = str_replace_na(V4,'NA')) 
+  #     
+  #     
+  #      EV_MAB_genes %>% 
+  #     mutate(start = start -1) %>%
+  #        filter(end=="125076") 
+
+     EV_MAB_reads_coverage_geneID_GO_terms_synteny.v1 %>%
+       filter(GO_terms !="NA")
+       tail()
+```
+

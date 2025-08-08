@@ -1,0 +1,599 @@
+---
+  title: "reads_coverage_plot"
+author: "Sadik M"
+date: "`r Sys.Date()`"
+output: html_document
+---
+  
+  ```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+EV_MAB_reads_coverage %>%
+  # head()
+  mutate(query = str_replace_na(query,"NA")) %>%
+  filter(query=="NA") %>%
+  distinct(reads_genome)
+
+EV_MAB_reads_coverage <- 
+  EV_MAB_reads_coverage %>%
+  mutate(query = str_replace_na(query,"NA"),
+         query = case_when(query=="NA" & str_detect(reads_genome,"A-sub") ~ "panMA_reads",
+                           query=="NA" & str_detect(reads_genome,"B-sub") ~ "panMB_reads",
+                           query=="NA" & str_detect(reads_genome,"S-sub") ~ "MS_LongReads",
+                           query=="NA" & str_detect(reads_genome,"T-sub") ~ "MT_LongReads",
+                           TRUE ~ query)) 
+
+
+```
+
+
+
+
+## Tidy up data
+```{r combined_plot}
+
+EV_MAB_reads_coverage <-
+  EV_MAB_reads_coverage %>%
+  mutate(
+    group = case_when(
+      str_detect(ref_genome, "musa_acuminata") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> MA genome",
+      str_detect(ref_genome, "musa_acuminata") &
+        str_detect(query, "panMA_reads") ~ "*Musa spp.* A-genome NGS reads vs <br> MA genome",
+      str_detect(ref_genome, "musa_balbisiana") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> MB genome",
+      str_detect(ref_genome, "musa_balbisiana") &
+        str_detect(query, "panMB_reads") ~ "*Musa spp.* B-genome NGS vs <br> MB genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "panM\\w+_reads") ~ "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "panM\\w+_reads") ~ "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "MS_LongReads") ~ "*MS long reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "MT_LongReads") ~ "*MT long reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "MS_LongReads") ~ "*MS long reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "MT_LongReads") ~ "*MT long reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "MT_LongReads") ~ "*MT long reads vs <br> EV (Bedadeti) genome"
+    )
+    
+  )
+
+
+EV_MAB_reads_coverage %>%
+  mutate(group = str_replace_na(group,"NA")) %>%
+  filter(group=="NA") %>%
+  distinct(query)
+
+# EV_MAB_reads_coverage %>% distinct(group)  %>% dput()
+
+
+EV_MAB_reads_coverage$group = factor(EV_MAB_reads_coverage$group,
+                                     levels = c( 
+                                       "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Mazia) genome", 
+                                       "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Bedadeti) genome", 
+                                       "*E. ventricosum* NGS reads vs <br> MA genome", 
+                                       "*E. ventricosum* NGS reads vs <br> MB genome",
+                                       "*Musa spp.* A-genome NGS reads vs <br> MA genome", 
+                                       "*Musa spp.* B-genome NGS vs <br> MB genome", 
+                                       "*E. ventricosum* NGS reads vs <br> EV (Mazia) genome",
+                                       "*E. ventricosum* NGS reads vs <br> EV (Bedadeti) genome",
+                                       "*MS long reads vs <br> EV (Mazia) genome",
+                                       "*MT long reads vs <br> EV (Mazia) genome",
+                                       "*MS long reads vs <br> EV (Bedadeti) genome",
+                                       "*MT long reads vs <br> EV (Bedadeti) genome"))
+
+
+```
+
+## Write coverage data to disk for each genome to identify overlapping syntenic loci from nucmer, mashmap and lastz
+```{r}
+EV_MAB_reads_coverage %>%
+  dplyr::filter(ref_genome=="musa_acuminata",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                query=="panEV_reads") %>%
+  #   dplyr::filter(str_detect(query,"LongReads")) %>%
+  # distinct(query)
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>%
+  distinct() %>%
+  write.table(paste0(DATA_DIR,"plot_out/panEV_MA_coverage.allMapped.02.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+EV_MAB_reads_coverage %>%
+  # distinct(query)
+  dplyr::filter(ref_genome=="musa_acuminata",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                query=="panMA_reads",
+                reads_genome=="A-sub genome banana genotypes") %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>% 
+  distinct() %>%
+  write.table(paste0(DATA_DIR,"plot_out/panMA_MA_coverage.allMapped.02.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+
+EV_MAB_reads_coverage %>%
+  dplyr::filter(ref_genome=="musa_balbisiana",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                query=="panEV_reads") %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>%
+  distinct() %>%
+  write.table(paste0(DATA_DIR,"plot_out/panEV_MB_coverage.allMapped.02.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+EV_MAB_reads_coverage %>%
+  dplyr::filter(ref_genome=="musa_balbisiana",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                query=="panMB_reads",
+                reads_genome=="B-sub genome banana genotypes") %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>% 
+  distinct() %>%
+  write.table(paste0(DATA_DIR,"plot_out/panMB_MB_coverage.allMapped.02.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+## Mazia 
+EV_MAB_reads_coverage %>%
+  # distinct(query)
+  dplyr::filter(ref_genome=="ev_mazia",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                query=="panMAB_reads") %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>%
+  distinct() %>%
+  write.table(paste0(DATA_DIR,"plot_out/panMAB_mazia_coverage.allMapped.02.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+EV_MAB_reads_coverage %>%
+  # distinct(query)
+  dplyr::filter(ref_genome=="ev_mazia",
+                #reads_used=="allMapped",
+                gene_repeat=="gene",
+                str_detect(query,"LongReads")) %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>%
+  distinct() %>%
+  write.table(paste0(DATA_DIR,"plot_out/panMSMT__mazia_coverage.allMapped.02.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+
+EV_MAB_reads_coverage %>%
+  dplyr::filter(ref_genome=="ev_mazia",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                query=="panMA_reads",
+                reads_genome == "A-sub genome banana genotypes"
+  ) %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>%
+  distinct() %>%
+  write.table(paste0(DATA_DIR,"plot_out/panMA_mazia_coverage.allMapped.02.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+EV_MAB_reads_coverage %>%
+  dplyr::filter(ref_genome=="ev_mazia",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                # query=="panMB_reads",
+                reads_genome == "B-sub genome banana genotypes"
+  ) %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>%
+  distinct() %>%
+  write.table(paste0(DATA_DIR,"plot_out/panMB_mazia_coverage.all.Mapped.02.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+
+EV_MAB_reads_coverage %>%
+  dplyr::filter(ref_genome=="ev_mazia",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                # query=="panMB_reads",
+                reads_genome == "EV genotypes"
+  ) %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>%
+  distinct() %>%
+  write.table(paste0(DATA_DIR,"plot_out/panEV_mazia_coverage.allMapped.01.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+
+
+
+## bedadeti 
+
+EV_MAB_reads_coverage %>%
+  dplyr::filter(ref_genome=="ev_bedadeti",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                query=="panMAB_reads") %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>%
+  write.table(paste0(DATA_DIR,"plot_out/panMAB_bedadeti_coverage.01.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+
+EV_MAB_reads_coverage %>%
+  dplyr::filter(ref_genome=="ev_bedadeti",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                # query=="panMB_reads",
+                reads_genome == "A-sub genome banana genotypes") %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>%
+  write.table(paste0(DATA_DIR,"plot_out/panMA_bedadeti_coverage.01.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+EV_MAB_reads_coverage %>%
+  dplyr::filter(ref_genome=="ev_bedadeti",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                # query=="panMB_reads",
+                reads_genome == "B-sub genome banana genotypes") %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>%
+  write.table(paste0(DATA_DIR,"plot_out/panMB_bedadeti_coverage.01.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+
+EV_MAB_reads_coverage %>%
+  dplyr::filter(ref_genome=="ev_bedadeti",
+                reads_used=="allMapped",
+                gene_repeat=="gene",
+                # query=="panMB_reads",
+                reads_genome == "EV genotypes") %>%
+  mutate(fraction_overlap = round(fraction_overlap,2)) %>%
+  dplyr::select(seq.name,start,end,fraction_overlap) %>%
+  write.table(paste0(DATA_DIR,"plot_out/panEV_bedadeti_coverage.01.bed"),
+              col.names = F, row.names = F, quote = F, sep = "\t")
+
+```
+
+## Generate plot 1
+```{r}
+EV_MAB_reads_coverage %>% 
+  as.data.frame() %>%
+  filter(
+    group !="*Musa spp.* A-genome NGS reads vs <br> MA genome",
+    group !="*Musa spp.* B-genome NGS vs <br> MB genome",
+    group !="*E. ventricosum* NGS reads vs <br> MA genome",
+    group !="*E. ventricosum* NGS reads vs <br> MB genome",
+    gene_repeat=="gene"
+  ) %>% 
+  filter(reads_used =="allMapped") %>%
+  distinct() %>%
+  group_by( seq.name, start,  end, ref_genome, reads_used, gene_repeat, query, group) %>%
+  summarise(fraction_overlap = mean(fraction_overlap)) %>%
+  ungroup() %>%
+  as.data.frame() %>%
+  ggplot(aes(fraction_overlap)) +
+  geom_freqpoly(linewidth=1, color="blue")+
+  facet_wrap(~group, ncol = 2, nrow = 2, scales = "free")+
+  # 
+  labs(x = "Fraction coverage of each *E. ventricosum* gene<br>against genomic reads of either *Musa spp* (top) or *Ensete ventricosum* genotypes (bottom)" ,
+       y = "Count of genes",
+       color = "Source of EV<br>genomic reads (landraces)")+
+  theme_bw()+
+  theme(
+    axis.title.x = element_markdown(size = 8,face = "bold"),
+    axis.title.y = element_text(size = 8, face = "bold"),
+    axis.text.x = element_markdown(size = 8,face ="bold"),
+    axis.text.y = element_text(size = 8,face = "bold"),
+    strip.text.x = element_markdown(size=8, face = "bold"),
+    legend.text = element_markdown(margin = margin(r=8),size = 8,face = "bold"),
+    legend.title = element_markdown(size=8, face="bold"),
+    legend.key.size = unit(0.35,"cm"),
+    legend.position = "none"
+    
+  )
+
+# OUTPUT_DIR="/Users/u1866313/rstudio/bgimazia_musa/reannotation_analysis/mazia_reannotation/orthofinder/monocot_blastp/EV_MAB_mapping_v1/"
+
+# ggsave(paste0(DATA_DIR,"plot_out/EV_MAB_reads_coverage_EV_genomes.pdf"), width=6, height=5)
+ggsave(paste0(DATA_DIR,"plot_out/EV_MAB_reads_all_mapped_coverage_EV_genomes.02.pdf"), width=6, height=5)
+
+
+```
+
+## Generate plot 2
+```{r}
+EV_MAB_reads_coverage %>% 
+  as.data.frame() %>%
+  filter(
+    group !="*Musa spp.* A- and B-genome NGS reads vs <br> EV (Mazia) genome",
+    group !="*Musa spp.* A- and B-genome NGS reads vs <br> EV (Bedadeti) genome",
+    group !="*E. ventricosum* NGS reads vs <br> EV (Bedadeti) genome",
+    group !="*E. ventricosum* NGS reads vs <br> EV (Mazia) genome",
+    gene_repeat=="gene"
+  ) %>% 
+  filter(reads_used =="allMapped") %>%
+  group_by( seq.name, start,  end, ref_genome, reads_used, gene_repeat, query, group) %>%
+  summarise(fraction_overlap = mean(fraction_overlap)) %>%
+  ungroup() %>%
+  as.data.frame() %>%
+  ggplot(aes(fraction_overlap)) +
+  geom_freqpoly(linewidth=1, color="blue")+
+  facet_wrap(~group, ncol = 2, nrow = 2, scales = "free")+
+  labs(x = "Fraction coverage of each *Musa spp.* gene<br> against genomic reads of either *Ensete ventricosum* genotypes (top) or *Musa spp* (bottom)" ,
+       y = "Count of genes",
+       color = "Source of EV<br>genomic reads (landraces)")+
+  theme_bw()+
+  theme(
+    axis.title.x = element_markdown(size = 8,face = "bold"),
+    axis.title.y = element_text(size = 8, face = "bold"),
+    axis.text.x = element_markdown(size = 8,face ="bold"),
+    axis.text.y = element_text(size = 8,face = "bold"),
+    strip.text.x = element_markdown(size=8, face = "bold"),
+    legend.text = element_markdown(margin = margin(r=8),size = 8,face = "bold"),
+    legend.title = element_markdown(size=8, face="bold"),
+    legend.key.size = unit(0.35,"cm"),
+    legend.position = "none"
+    
+  )
+
+# OUTPUT_DIR="/Users/u1866313/rstudio/bgimazia_musa/reannotation_analysis/mazia_reannotation/orthofinder/monocot_blastp/EV_MAB_mapping_v1/"
+
+# ggsave(paste0(DATA_DIR,"plot_out/EV_MAB_reads_coverage_MAB_genomes.pdf"), width=6, height=5)
+ggsave(paste0(DATA_DIR,"plot_out/EV_MAB_reads_allMapped_coverage_MAB_genomes.01.pdf"), width=6, height=5)
+
+```
+
+
+## Tidy up coverage of regions in EV that lack synteny with MAB and vice versa (non-syntenic genes)
+```{r}
+# update data structure 
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v1 <-
+  EV_MAB_reads_coverage_no_lastz_nucmer_alignment %>% 
+  as.data.frame() %>%
+  filter(gene_repeat=="gene" ) %>% 
+  # filter(reads_used =="allMapped") %>%
+  select( seq.name, start,  end, ref_genome, reads_used, reads_genome, gene_repeat, query, group, fraction_overlap, syn_cov) %>%
+  mutate(syn_cov = str_replace_na(syn_cov,"NA")) %>%
+  filter(fraction_overlap >= 0.456) %>%
+  mutate(frac_ovrerlap_syn = fraction_overlap) %>%
+  distinct() %>%
+  rbind(
+    
+    EV_MAB_reads_coverage_no_lastz_nucmer_alignment %>% 
+      as.data.frame() %>%
+      filter(gene_repeat=="gene") %>% 
+      # filter(reads_used =="allMapped") %>%
+      select(seq.name, start,  end, ref_genome, reads_used,reads_genome, gene_repeat, query, group, fraction_overlap, syn_cov) %>%
+      mutate(syn_cov = str_replace_na(syn_cov,"NA"),
+             syn_cov = as.numeric(syn_cov)) %>%
+      filter(fraction_overlap < 0.245, syn_cov >=0.245) %>%
+      mutate(frac_ovrerlap_syn = syn_cov),
+    
+    
+    EV_MAB_reads_coverage_no_lastz_nucmer_alignment %>% 
+      as.data.frame() %>%
+      filter(gene_repeat=="gene") %>% 
+      # filter(reads_used =="allMapped") %>%
+      select(seq.name, start,  end, ref_genome, reads_used, reads_genome, gene_repeat, query, group, fraction_overlap, syn_cov) %>%
+      mutate(syn_cov = str_replace_na(syn_cov,"NA"),
+             syn_cov = as.numeric(syn_cov)) %>%
+      filter(fraction_overlap < 0.245, syn_cov <0.245) %>%
+      mutate(frac_ovrerlap_syn = fraction_overlap) 
+  ) %>%
+  filter(gene_repeat == "gene") %>%
+  select(-syn_cov,-gene_repeat) %>%
+  distinct()
+# head()
+
+
+# EV_MAB_reads_coverage %>% distinct(group)  %>% dput()
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v1 <- 
+  EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v1 %>%
+  mutate(
+    query = case_when(str_detect(reads_genome,"A-sub") ~ "panMA_reads",
+                      str_detect(reads_genome,"B-sub") ~ "panMB_reads",
+                      str_detect(reads_genome,"S-sub") ~ "MS_LongReads",
+                      str_detect(reads_genome,"T-sub") ~ "MT_LongReads",
+                      TRUE ~ query))
+
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v1 <-
+  EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v1 %>%
+  mutate(
+    group = case_when(
+      str_detect(ref_genome, "musa_acuminata") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> MA genome",
+      str_detect(ref_genome, "musa_acuminata") &
+        str_detect(query, "panMA_reads") ~ "*Musa spp.* A-genome NGS reads vs <br> MA genome",
+      str_detect(ref_genome, "musa_balbisiana") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> MB genome",
+      str_detect(ref_genome, "musa_balbisiana") &
+        str_detect(query, "panMB_reads") ~ "*Musa spp.* B-genome NGS vs <br> MB genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "panMA_reads") ~ "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "panMB_reads") ~ "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "panMA_reads") ~ "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "panMB_reads") ~ "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "panEV_reads") ~ "*E. ventricosum* NGS reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "MS_LongReads") ~ "*MS long reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "MT_LongReads") ~ "*MT long reads vs <br> EV (Mazia) genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "MS_LongReads") ~ "*MS long reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_bedadeti") &
+        str_detect(query, "MT_LongReads") ~ "*MT long reads vs <br> EV (Bedadeti) genome",
+      str_detect(ref_genome, "ev_mazia") &
+        str_detect(query, "MT_LongReads") ~ "*MT long reads vs <br> EV (Bedadeti) genome"
+    )
+    
+  )
+
+
+
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v1$group = factor(EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v1$group,
+                                                                  levels = c( 
+                                                                    "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Mazia) genome", 
+                                                                    "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Bedadeti) genome", 
+                                                                    "*E. ventricosum* NGS reads vs <br> MA genome", 
+                                                                    "*E. ventricosum* NGS reads vs <br> MB genome",
+                                                                    "*Musa spp.* A-genome NGS reads vs <br> MA genome", 
+                                                                    "*Musa spp.* B-genome NGS vs <br> MB genome", 
+                                                                    "*E. ventricosum* NGS reads vs <br> EV (Mazia) genome",
+                                                                    "*E. ventricosum* NGS reads vs <br> EV (Bedadeti) genome",
+                                                                    "*MS long reads vs <br> EV (Mazia) genome",
+                                                                    "*MT long reads vs <br> EV (Mazia) genome",
+                                                                    "*MS long reads vs <br> EV (Bedadeti) genome",
+                                                                    "*MT long reads vs <br> EV (Bedadeti) genome"))
+
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v2 <-
+  EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v1 %>% 
+  as.data.frame() %>%
+  filter(
+    group !="*Musa spp.* A-genome NGS reads vs <br> MA genome",
+    group !="*Musa spp.* B-genome NGS vs <br> MB genome",
+    group !="*E. ventricosum* NGS reads vs <br> MA genome",
+    group !="*E. ventricosum* NGS reads vs <br> MB genome"
+    # !str_detect(group,"long reads")
+  ) %>% 
+  distinct() %>%
+  filter(reads_used !="qfiltered") %>%
+  group_by( seq.name, start,  end, ref_genome, group) %>%
+  # group_by( seq.name, start,  end, ref_genome, reads_used, gene_repeat, query, group) %>%
+  summarise(fraction_overlap = max(fraction_overlap)) %>%
+  ungroup()
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v2 %>%
+  distinct(group)
+
+# 
+# EV_MAB_reads_coverage_no_lastz_nucmer_alignment$group = factor(EV_MAB_reads_coverage_no_lastz_nucmer_alignment$group,
+#                                      levels = c( 
+#                                                 "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Mazia) genome", 
+#                                                 "*Musa spp.* A- and B-genome NGS reads vs <br> EV (Bedadeti) genome", 
+#                                                 "*E. ventricosum* NGS reads vs <br> MA genome", 
+#                                                 "*E. ventricosum* NGS reads vs <br> MB genome",
+#                                                 "*Musa spp.* A-genome NGS reads vs <br> MA genome", 
+#                                                 "*Musa spp.* B-genome NGS vs <br> MB genome", 
+#                                                 "*E. ventricosum* NGS reads vs <br> EV (Mazia) genome",
+#                                                 "*E. ventricosum* NGS reads vs <br> EV (Bedadeti) genome" 
+#                                      ))
+
+
+```
+
+
+```{r}
+
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v1 %>% 
+  as.data.frame() %>%
+  filter(
+    group !="*Musa spp.* A- and B-genome NGS reads vs <br> EV (Mazia) genome",
+    group !="*Musa spp.* A- and B-genome NGS reads vs <br> EV (Bedadeti) genome",
+    group !="*E. ventricosum* NGS reads vs <br> EV (Bedadeti) genome",
+    group !="*E. ventricosum* NGS reads vs <br> EV (Mazia) genome",
+    # gene_repeat=="gene"
+    !str_detect(group,"long reads")
+  ) %>% 
+  filter(reads_used !="qfiltered") %>%
+  distinct() %>%
+  group_by( seq.name, start,  end, ref_genome, group) %>%
+  summarise(fraction_overlap = max(fraction_overlap)) %>%
+  ungroup() %>%
+  as.data.frame() %>%
+  ggplot(aes(fraction_overlap)) +
+  geom_freqpoly(linewidth=1, color="blue")+
+  facet_wrap(~group, ncol = 2, nrow = 2, scales = "free")+
+  labs(x = "Fraction coverage of each non-syntenic *Musa spp.* gene<br> against genomic reads of either *Ensete ventricosum* genotypes (top) or *Musa spp* (bottom)" ,
+       y = "Count of genes",
+       color = "Source of EV<br>genomic reads (landraces)")+
+  theme_bw()+
+  theme(
+    axis.title.x = element_markdown(size = 8,face = "bold"),
+    axis.title.y = element_text(size = 8, face = "bold"),
+    axis.text.x = element_markdown(size = 8,face ="bold"),
+    axis.text.y = element_text(size = 8,face = "bold"),
+    strip.text.x = element_markdown(size=8, face = "bold"),
+    legend.text = element_markdown(margin = margin(r=8),size = 8,face = "bold"),
+    legend.title = element_markdown(size=8, face="bold"),
+    legend.key.size = unit(0.35,"cm"),
+    legend.position = "none"
+    
+  )
+
+# OUTPUT_DIR="/Users/u1866313/rstudio/bgimazia_musa/reannotation_analysis/mazia_reannotation/orthofinder/monocot_blastp/EV_MAB_mapping_v1/"
+
+# ggsave(paste0(DATA_DIR,"plot_out/EV_MAB_reads_coverage_MAB_genomes.pdf"), width=6, height=5)
+ggsave(paste0(DATA_DIR,"plot_out/EV_MAB_reads_allMapped_coverage_MAB_genomes.lastz_nucmer.04.pdf"), width=6, height=5)
+
+```
+
+
+# Generate plot 2 for non-syntenic genes 
+```{r}
+
+EV_MAB_reads_coverage_no_lastz_nucmer_alignment.v1 %>% 
+  as.data.frame() %>%
+  filter(
+    group !="*Musa spp.* A-genome NGS reads vs <br> MA genome",
+    group !="*Musa spp.* B-genome NGS vs <br> MB genome",
+    group !="*E. ventricosum* NGS reads vs <br> MA genome",
+    group !="*E. ventricosum* NGS reads vs <br> MB genome",
+    !str_detect(group,"long reads")
+  ) %>% 
+  distinct() %>%
+  filter(reads_used !="qfiltered") %>%
+  group_by( seq.name, start,  end, ref_genome, group) %>%
+  # group_by( seq.name, start,  end, ref_genome, reads_used, gene_repeat, query, group) %>%
+  summarise(fraction_overlap = max(fraction_overlap)) %>%
+  ungroup() %>%
+  as.data.frame() %>%
+  ggplot(aes(fraction_overlap)) +
+  geom_freqpoly(linewidth=1, color="blue")+
+  facet_wrap(~group, ncol = 2, nrow = 2, scales = "free")+
+  labs(x = "Fraction coverage of each non-syntenic *E. ventricosum* gene<br>against genomic reads of either *Musa spp* (top) or *Ensete ventricosum* genotypes (bottom)" ,
+       y = "Count of genes",
+       color = "Source of EV<br>genomic reads (landraces)")+
+  theme_bw()+
+  theme(
+    axis.title.x = element_markdown(size = 8,face = "bold"),
+    axis.title.y = element_text(size = 8, face = "bold"),
+    axis.text.x = element_markdown(size = 8,face ="bold"),
+    axis.text.y = element_text(size = 8,face = "bold"),
+    strip.text.x = element_markdown(size=8, face = "bold"),
+    legend.text = element_markdown(margin = margin(r=8),size = 8,face = "bold"),
+    legend.title = element_markdown(size=8, face="bold"),
+    legend.key.size = unit(0.35,"cm"),
+    legend.position = "none"
+    
+  )
+
+# OUTPUT_DIR="/Users/u1866313/rstudio/bgimazia_musa/reannotation_analysis/mazia_reannotation/orthofinder/monocot_blastp/EV_MAB_mapping_v1/"
+
+# ggsave(paste0(DATA_DIR,"plot_out/EV_MAB_reads_coverage_MAB_genomes.pdf"), width=6, height=5)
+
+ggsave(paste0(DATA_DIR,"plot_out/EV_MAB_reads_all_mapped_coverage_EV_genomes.lastz_nucme.04.pdf"), width=6, height=5)
+
+```
+
