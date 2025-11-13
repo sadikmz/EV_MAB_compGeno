@@ -1,29 +1,15 @@
 #!/bin/bash
-#SBATCH --job-name=maker
-#SBATCH --partition=compute
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=48
-#SBATCH --mem-per-cpu=3700
-#SBATCH --time=48:00:00
-#SBATCH --output=fc.%J.out
-#SBATCH --error=fc.%J.err
-#SBATCH --mail-type=FAIL,END  # Type of email notification- BEGIN,END,FAIL,ALL
-#SBATCH --mail-user=Sadik.Muzemil@warwick.ac.uk
 
-module load intel impi imkl
-module purge
-
-genotype=mazia 
+genotype="genotype_prefix" 
 trinity_rnaseq=data/Trinity.fasta
 trinity_cleaned=data/Trinity.cleaned.fasta 
 trans_gtf=${genotype}_rnaseq.gff
 genome=${genotype}.fna 
-cpus=48
+cpus=n
 
 
 ~/apps/PASApipeline-v2.5.1/bin/seqclean /data/Trinity.fasta -c 48 -o $trinity_rnaseq -n 10000
 
-# landrace/genotype mazia and bedadeti
 ~/apps/PASApipeline-v2.5.1/Launch_PASA_pipeline.pl \
 -c ~/apps/PASApipeline-v2.5.1//pasa_conf/pasa.config \
 -C -R \

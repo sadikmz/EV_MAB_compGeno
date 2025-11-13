@@ -1,7 +1,7 @@
-# Structural identification and annotation repeatitive elements
+### 1. Structural identification and annotation repeatitive elements
+
 ```bash
-#Installations :
-conda create -n repeatmasking -c bioconda RepeatMasker repeatmodeler trf 
+#!/bin/bash
 
 # Set path to assembled genome
 genome=path_to_assembled_genome
@@ -114,9 +114,11 @@ cat $rep_file.final ${genome}.fna.mod.EDTA.TElib.fa > ${genome}_repeat_lib.fasta
 
 ```
 
-# Annotation of structurally identified repeatitive elements
+### 2. Annotation of structurally identified repeatitive elements
 
 ```bash
+#!/bin/bash
+
 RepeatMasker -nolow -no_is -norna -engine ncbi -lib ${genome}_repeat_lib.fasta ${genome}.fna -pa 12 -gff -poly -u -xsmall
 
 RM2Bed.py ${genome}.fna.out

@@ -1,24 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=maker
-#SBATCH --partition=compute
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=48
-#SBATCH --mem-per-cpu=3700
-#SBATCH --time=48:00:00
-#SBATCH --output=fc.%J.out
-#SBATCH --error=fc.%J.err
-#SBATCH --mail-type=FAIL,END  # Type of email notification- BEGIN,END,FAIL,ALL
-#SBATCH --mail-user=Sadik.Muzemil@warwick.ac.uk
-
-module purge
-module load GCC/11.3.0 OpenMPI/4.1.4
-module load MAKER/3.01.04
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-cpus=48
+cpus=n
 maxIntronLen=82825
-MAKERDIR="mazia"
-genotype=mazia
+MAKERDIR="genotype_prefix"
+genotype=genotype_prefix
 
 # round 1
 maker -CTL 

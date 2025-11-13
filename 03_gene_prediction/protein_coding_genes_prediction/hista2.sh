@@ -1,20 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=rnaseq
-#SBATCH --partition=hmem
-#SBATCH --nodes=1
-#SBATCH --cpus-per-task=48
-#SBATCH --mem-per-cpu=3700
-#SBATCH --time=48:00:00
-#SBATCH --output=fc.%J.out
-#SBATCH --error=fc.%J.err
-#SBATCH --mail-type=FAIL,END  # Type of email notification- BEGIN,END,FAIL,ALL
-#SBATCH --mail-user=Sadik.Muzemil@warwick.ac.uk
 
-module load intel impi imkl
+genotype_prefix
+export OMP_NUM_THREADS=n
 
-export OMP_NUM_THREADS=48
-
-RNAseq=/home/lifesci/lfrwtp/data/rna_seq/DP8400009186BL_L01
+RNAseq=~/data/rna_seq/DP8400009186BL_L01
 cpus=$cpus
 softmasked_genome=softmasked.fna # 
 BASENAME=$(echo $softmasked_genome | sed "s/.fna//g")
