@@ -20,7 +20,6 @@ rm $wgs_dir/trim_out/SRR151526?_?.fastq.gz
 # For landrace Mazia, remove stLRF adapter sequences using 
 # Run [stLFR2Supernova (v2.1.1)](https://github.com/BGI-Qingdao/stlfr2supernova_pipeline) and merge them with Mazia NGS reads
 
-
 ## Create output directory
 mkdir stLFR_assemble
 cd stLFR_assemble
@@ -57,7 +56,7 @@ bedadeti
 
 ```bash
 #!/bin/bash
-
+data_dir=/home/data
 # Run jellyfish and genomescope2. Testng kmer sizes of 17, 21, 27, and 31.
 for K in 17 21 27 31;
 do
@@ -66,7 +65,7 @@ do
         do
 		
 		# Trim adapter and poor quality reads 
-		trim_galore --cores 40 --quality 30 --fastqc -out jungle_seed --paired ${i}.1.fq.gz ${i}.2.fq.gz
+		trim_galore --cores 40 --quality 30 --fastqc -out "$data_dir"_trim_out --paired "$data_dir"/${i}.1.fq.gz "$data_dir"/${i}.2.fq.gz
 		
         # generate Kmer tabel 
         ${prog}/jellyfish-linux count -C -m $k -s 580M --bf-size 25G -t 16 <(zcat ${K}.${L}_1_val_1.fq.gz) <(zcat ${K}${L}_2_val_2.fq.gz) -o ${L}.${K}_mer.reads.jf
@@ -105,6 +104,40 @@ for (acc in accessions) {
 ````
 
 ### 3. Kmer-mer ploidy level estimation using Smudgeplot
+
+```bash
+#!/bin/bash
+
+data_dir=/home/data/
+tmp="/dev/shm"
+threads=n_threads
+
+genotype=prefix_of_trimmed_reads_name_for_each_genomes
+
+# create outout directory 
+mkdir "$genotype"_ouput tmp_k"$K"
+# mv *fastq.gz data/Scer/
+
+# run FastK to create a k-mer database
+FastK -v -t4 -k31 -M16 -T"$threads" "$data_dir"/trim_out/*gz -N"$genotype"_ouput/FastK_Table -Ptmp_k"$K"
+
+# Run PloidyPlot to find all k-mer pairs in the dataset
+PloidyPlot -e12 -k -v -T"$threads" -o"$genotype"_ouput/kmerpairs "$genotype"_ouput/FastK_Table -P"$tmp"
+# this now generated `data/Scer/kmerpairs_text.smu` file;
+# it's a flat file with three columns; covB, covA and freq (the number of k-mer pairs with these respective coverages)
+
+# use the .smu file to infer ploidy and create smudgeplot
+smudgeplot.py plot -n 15 -t "$genotype" -o "$genotype"_ouput/"$genotype"_smplot "$genotype"_ouput/kmerpairs_text.smu
+
+# check that 5 files are generated (2 pdfs; a summary tsv table, and two txt logs)
+ls "$genotype"_ouput/"$genotype"_smplot*
+
+# remove tmp dir
+rm -rf tmp_k"$K"
+rm $tmp
+```
+
+
 
 
 ### 4. Assembly QC
