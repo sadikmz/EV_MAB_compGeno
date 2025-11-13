@@ -1,1 +1,0 @@
-/Users/sadik/miniforge3/bin/picard

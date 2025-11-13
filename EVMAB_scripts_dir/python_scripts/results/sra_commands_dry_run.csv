@@ -1,6 +1,0 @@
-genotype,sra,bioproject,command,type
-Jungleseed,SRR610420,PRJNA170519,"esearch -db sra -query PRJNA170519 | efetch -format runinfo | cut -d ',' -f 1 | grep SRR | grep -E 'SRR610420' | xargs -n 1 -P 8 fastq-dump --split-files --gzip --skip-technical",download
-Jungleseed,SRR610420,PRJNA170519,trim_galore --cores 8 --quality 30 --fastqc --output_dir results/trim_out --paired results/SRR610420_1.fastq.gz results/SRR610420_2.fastq.gz,trim
-Bedadeti,"SRR1515268, SRR1515269",PRJNA252658,"esearch -db sra -query PRJNA252658 | efetch -format runinfo | cut -d ',' -f 1 | grep SRR | grep -E 'SRR1515268|SRR1515269' | xargs -n 1 -P 8 fastq-dump --split-files --gzip --skip-technical",download
-Bedadeti,SRR1515268,PRJNA252658,trim_galore --cores 8 --quality 30 --fastqc --output_dir results/trim_out --paired results/SRR1515268_1.fastq.gz results/SRR1515268_2.fastq.gz,trim
-Bedadeti,SRR1515269,PRJNA252658,trim_galore --cores 8 --quality 30 --fastqc --output_dir results/trim_out --paired results/SRR1515269_1.fastq.gz results/SRR1515269_2.fastq.gz,trim
