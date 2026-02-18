@@ -1,0 +1,601 @@
+```{r libraries}
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(ggVennDiagram)
+  library(UpSetR)
+  library(ggtext)
+})
+```
+
+```{r config}
+# Base directory for all OrthoFinder outputs — set via env var or edit here
+BASE_DIR <- Sys.getenv("ORTHOFINDER_DIR", unset = "/path/to/orthofinder/EV_AED20_MAB")
+
+# Four genomes: EV Mazia (EV_maz), EV Bedadeti (EV_bed), Musa acuminata (MA), Musa balbisiana (MB)
+SPECIES_COLS <- c(
+  "Ensete_ventricosum_bedadeti",
+  "Ensete_ventricosum_mazia",
+  "Musa_acuminata",
+  "Musa_balbisiana"
+)
+
+# Shared theme for horizontal bar charts (reused across three plots)
+base_theme <- theme(
+  axis.title.x       = element_markdown(size = 12, face = "bold"),
+  axis.title.y       = element_blank(),
+  axis.line.x        = element_line(),
+  axis.line.y        = element_line(),
+  axis.text.y        = element_markdown(size = 12),
+  axis.text.x        = element_markdown(size = 12),
+  panel.grid.major.x = element_line(color = "#888888", linewidth = 0.08),
+  panel.background   = element_rect(fill = "#FFFFFF", color = NA),
+  legend.title       = element_blank(),
+  legend.text        = element_markdown(size = 12)
+)
+```
+
+```{r helper_functions}
+# Left-join single_copy_orthologs and keep only rows that did NOT match
+exclude_single_copy <- function(df) {
+  df %>%
+    left_join(single_copy_orthologs, by = "Orthogroup") %>%
+    mutate(single_copy_OGs = str_replace_na(single_copy_OGs, "NA")) %>%
+    filter(single_copy_OGs == "NA")
+}
+
+# Strip scaffold coordinates and AED scores appended by OrthoFinder to gene IDs
+clean_gene_ids <- function(x) {
+  x %>%
+    str_remove_all("\\s\\w+\\s+\\w+_0\\.\\d+\\s+\\w+_0\\.\\d+") %>%
+    str_replace_all("\\|\\d+\\|\\d+\\|\\d+\\|\\d+\\|", "") %>%
+    str_replace_all("\\d+\\|\\d+\\|\\d+\\|", "") %>%
+    str_replace_all("_\\d+", "_") %>%
+    str_replace_all("_\\.\\d+", "_") %>%
+    str_replace_all("QI_", "") %>%
+    str_replace_all("\\|\\d+", "") %>%
+    str_replace_all("\\|--\\d+", "")
+}
+
+# Binarise raw gene counts: 1 = present in genome, 0 = absent
+binarise_counts <- function(df) {
+  df %>%
+    mutate(
+      Ensete_ventricosum_mazia     = as.integer(Ensete_ventricosum_mazia >= 1),
+      Ensete_ventricosum_bedadeti  = as.integer(Ensete_ventricosum_bedadeti >= 1),
+      Musa_acuminata               = as.integer(Musa_acuminata >= 1),
+      Musa_balbisiana              = as.integer(Musa_balbisiana >= 1)
+    )
+}
+
+binarise_unassigned <- function(df) {
+  df %>%
+    mutate(
+      Ensete_ventricosum_mazia     = as.integer(str_detect(Ensete_ventricosum_mazia, "\\w+")),
+      Ensete_ventricosum_bedadeti  = as.integer(str_detect(Ensete_ventricosum_bedadeti, "\\w+")),
+      Musa_acuminata               = as.integer(str_detect(Musa_acuminata, "\\w+")),
+      Musa_balbisiana              = as.integer(str_detect(Musa_balbisiana, "\\w+"))
+    )
+}
+
+# Identify genome-specific OGs: present in focal genome only, absent in all others
+filter_genome_specific <- function(data, focal_col) {
+  other_cols <- setdiff(SPECIES_COLS, focal_col)
+  data %>%
+    filter(.data[[focal_col]] == 1) %>%
+    filter(if_all(all_of(other_cols), ~ . == 0)) %>%
+    select(Orthogroup)
+}
+
+# Write duplicated genes (gene column) for a given genome's species-specific OGs
+write_dup_genes <- function(genome_label, gene_col, prefix, out_file) {
+  species_specific_OGs_all %>%
+    left_join(duplications_all, by = "Orthogroup") %>%
+    mutate(Species.Tree.Node = str_replace_na(Species.Tree.Node, "NA")) %>%
+    filter(Species.Tree.Node != "NA", genome == genome_label) %>%
+    distinct() %>%
+    select(Orthogroup, all_of(gene_col)) %>%
+    mutate(across(all_of(gene_col), ~ str_remove_all(., prefix) %>% clean_gene_ids())) %>%
+    write.table(
+      file.path(dup_dir, out_file),
+      col.names = FALSE, row.names = FALSE, quote = FALSE, sep = "\t"
+    )
+}
+
+# Summarise gene counts by OG category for the stacked bar plot
+summarise_og_genes <- function(df, label) {
+  df %>%
+    summarise(
+      Musa_acuminata              = sum(Musa_acuminata),
+      Musa_balbisiana             = sum(Musa_balbisiana),
+      Ensete_ventricosum_bedadeti = sum(Ensete_ventricosum_bedadeti),
+      Ensete_ventricosum_mazia    = sum(Ensete_ventricosum_mazia),
+      .groups = "drop"
+    ) %>%
+    pivot_longer(cols = all_of(SPECIES_COLS), values_to = "value") %>%
+    mutate(Orthogroup = label)
+}
+```
+
+```{r read_og_counts}
+# Merge assigned and unassigned OGs into a single presence/absence table
+EV_AED20_MAB.OG_GeneCount <-
+  read.delim(
+    file.path(BASE_DIR, "Orthogroups", "Orthogroups.GeneCount.tsv"),
+    sep = "\t", header = TRUE
+  ) %>%
+  binarise_counts() %>%
+  bind_rows(
+    read.delim(
+      file.path(BASE_DIR, "Orthogroups", "Orthogroups_UnassignedGenes.tsv"),
+      header = TRUE, sep = "\t"
+    ) %>%
+      binarise_unassigned()
+  ) %>%
+  select(-Total)
+```
+
+```{r venn_prep}
+venn_dir <- file.path(BASE_DIR, "Orthogroups", "VennDiag")
+dir.create(venn_dir, showWarnings = FALSE, recursive = TRUE)
+
+# Write per-genome OG membership lists for external tools / verification
+write_og_list <- function(data, genome_col, filename) {
+  data %>%
+    filter(.data[[genome_col]] == 1) %>%
+    select(Orthogroup) %>%
+    write.table(
+      file.path(venn_dir, filename),
+      col.names = FALSE, sep = "\t", quote = FALSE, row.names = FALSE
+    )
+}
+
+walk2(
+  c("Ensete_ventricosum_bedadeti", "Ensete_ventricosum_mazia",
+    "Musa_acuminata", "Musa_balbisiana"),
+  c("Ensete_ventricosum_bedadeti.OG.txt", "Ensete_ventricosum_mazia.OG.txt",
+    "Musa_acuminata.OG.txt", "Musa_balbisiana.OG.txt"),
+  ~ write_og_list(EV_AED20_MAB.OG_GeneCount, .x, .y)
+)
+
+read_og_vec <- function(filename) {
+  read.table(file.path(venn_dir, filename), header = FALSE, stringsAsFactors = FALSE)$V1
+}
+
+OG_list_VennDiag_EV_EG_MUSA <- list(
+  "Ensete ventricosum\n(Bedadeti)" = read_og_vec("Ensete_ventricosum_bedadeti.OG.txt"),
+  "Ensete ventricosum\n(Mazia)"    = read_og_vec("Ensete_ventricosum_mazia.OG.txt"),
+  "Musa acuminata"                 = read_og_vec("Musa_acuminata.OG.txt"),
+  "Musa balbisiana"                = read_og_vec("Musa_balbisiana.OG.txt")
+)
+```
+
+```{r vendiag}
+ggVennDiagram(x = OG_list_VennDiag_EV_EG_MUSA, size = 4.3) +
+  scale_fill_gradient(low = "light grey", high = "red", limits = c(0, 18000)) +
+  labs(fill = "Count") +
+  theme(plot.title = element_text(hjust = 0.6), legend.position = "none") +
+  scale_x_continuous(expand = expansion(mult = .2))
+
+ggsave(file.path(venn_dir, "EV_AED20_MAB_VenDiag.tiff"), width = 8, height = 4)
+```
+
+```{r summary_stat}
+read.delim(
+  file.path(BASE_DIR, "Comparative_Genomics_Statistics", "Statistics_Overall.tsv"),
+  sep = "\t", header = FALSE
+) %>%
+  slice(1:18) %>%  # rows 1-18 contain the summary statistics of interest in this OrthoFinder output
+  mutate(
+    V1 = str_replace_all(V1, "Number", "#"),
+    V1 = str_replace(V1, "Percentage", "%"),
+    V1 = str_replace(V1, "orthogroup", "OG")
+  ) %>%
+  write.table(
+    file.path(BASE_DIR, "Comparative_Genomics_Statistics", "Statistics_Overall.txt"),
+    sep = "\t", col.names = FALSE, row.names = FALSE, quote = FALSE
+  )
+```
+
+```{r dups_species_spec}
+# Identify genome-specific OGs (present in exactly one genome) and load duplication events
+species_specific_OGs_all <-
+  bind_rows(
+    filter_genome_specific(EV_AED20_MAB.OG_GeneCount, "Ensete_ventricosum_bedadeti") %>% mutate(genome = "EV_bedadeti"),
+    filter_genome_specific(EV_AED20_MAB.OG_GeneCount, "Ensete_ventricosum_mazia")    %>% mutate(genome = "EV_mazia"),
+    filter_genome_specific(EV_AED20_MAB.OG_GeneCount, "Musa_acuminata")              %>% mutate(genome = "MA"),
+    filter_genome_specific(EV_AED20_MAB.OG_GeneCount, "Musa_balbisiana")             %>% mutate(genome = "MB")
+  )
+
+dup_dir        <- file.path(BASE_DIR, "Gene_Duplication_Events")
+duplications_all <- read.delim(file.path(dup_dir, "Duplications.tsv"))
+```
+
+```{r plot_dup_species_specific}
+species_specific_OGs_all %>%
+  left_join(duplications_all, by = "Orthogroup") %>%
+  distinct() %>%
+  mutate(Species.Tree.Node = str_replace_na(Species.Tree.Node, "NA")) %>%
+  filter(Species.Tree.Node != "NA") %>%
+  select(Orthogroup, genome) %>%
+  distinct() %>%
+  group_by(genome) %>%
+  summarise(duplications_OG = n(), .groups = "drop") %>%
+  left_join(
+    species_specific_OGs_all %>%
+      group_by(genome) %>%
+      summarise(total = n(), .groups = "drop") %>%
+      arrange(total),
+    by = "genome"
+  ) %>%
+  pivot_longer(!genome, names_to = "OG_category", values_to = "value") %>%
+  mutate(
+    OG_category = str_replace(OG_category, "duplications_OG", "OGs with duplication events"),
+    OG_category = str_replace(OG_category, "total", "Genome specific OGs")
+  ) %>%
+  ggplot(aes(
+    x    = factor(genome, levels = c("EV_bedadeti", "EV_mazia", "MB", "MA")),
+    y    = value,
+    fill = OG_category
+  )) +
+  geom_col(position = "dodge") +
+  # Break values are data-derived: observed OG counts per genome category
+  scale_y_continuous(breaks = c(1139, 1927, 2477, 6095)) +
+  scale_x_discrete(
+    breaks = c("MB", "MA", "EV_bedadeti", "EV_mazia"),
+    labels = c("MB", "MA", "EV (Bedadeti)", "EV (Mazia)")
+  ) +
+  coord_flip() +
+  labs(y = "Number of genome specific orthogroups (OGs) or<br>OGs that underwent one or more duplication events") +
+  base_theme +
+  theme(legend.position = c(0.7, 0.9))
+```
+
+```{r dup_species_specific_genes}
+# Write duplicated gene IDs for Bedadeti- and Mazia-specific OGs (Genes.1 and Genes.2)
+write_dup_genes("EV_bedadeti", "Genes.1", "Ensete_ventricosum_bedadeti_", "bedadeti_unique_dup_gene1.txt")
+write_dup_genes("EV_bedadeti", "Genes.2", "Ensete_ventricosum_bedadeti_", "bedadeti_unique_dup_gene2.txt")
+write_dup_genes("EV_mazia",    "Genes.1", "Ensete_ventricosum_mazia_",    "mazia_unique_dup_gene1.txt")
+write_dup_genes("EV_mazia",    "Genes.2", "Ensete_ventricosum_mazia_",    "mazia_unique_dup_gene2.txt")
+```
+
+```{r parse_dup_genes}
+# Parse transposed duplication tables; stack gene IDs with their source OG and genome label.
+orthofinder_dups_OG_gene <-
+  map_dfr(c("bedadeti_unique_dup_gene2", "mazia_unique_dup_gene2"), function(OG) {
+    unique_dup_OG <- read.delim(
+      file.path(dup_dir, paste0(OG, "_transposed.txt")),
+      header = FALSE
+    )
+    map_dfr(seq_len(ncol(unique_dup_OG)), function(i) {
+      unique_dup_OG[i] %>%
+        setNames("V1") %>%
+        mutate(
+          OGs      = str_extract(V1, "^OG\\d+"),
+          OGs_from = OG
+        ) %>%
+        fill(OGs, .direction = "down") %>%
+        filter(!str_detect(V1, "^OG"), V1 != "")
+    })
+  })
+
+maz_bed_dups_OG_gene <-
+  orthofinder_dups_OG_gene %>%
+  mutate(OGs_from = str_remove_all(OGs_from, "_unique_dup_gene\\d"))
+
+# Summary: unique duplicated genes per genome
+maz_bed_dups_OG_gene %>%
+  select(-OGs) %>%
+  distinct() %>%
+  group_by(OGs_from) %>%
+  summarise(count_dup_OG_genes = n(), .groups = "drop")
+```
+
+```{r upset_view}
+EV_AED20_MAB.OG_GeneCount_Upset <-
+  EV_AED20_MAB.OG_GeneCount %>%
+  rename(
+    "MA"           = Musa_acuminata,
+    "MB"           = Musa_balbisiana,
+    "EV (Bedadeti)" = Ensete_ventricosum_bedadeti,
+    "EV (Mazia)"   = Ensete_ventricosum_mazia
+  )
+
+EV_AED20_MAB.OG_GeneCount_Upset %>%
+  upset(
+    scale.intersections = "identity", scale.sets = "identity",
+    point.size = 3.7, line.size = 0.5, nintersect = 500,
+    sets        = c("EV (Bedadeti)", "EV (Mazia)", "MA", "MB"),
+    mainbar.y.label = "Number of shared\nOrthogroups",
+    sets.x.label = NULL, order.by = "degree",
+    text.scale = c(1.8, 1.8, 1.50, 1.5, 1.80, 0.1),
+    number.angles = 0, keep.order = TRUE
+  )
+```
+
+```{r upset_final}
+# Query colours encode intersection categories (last-match-wins in UpSetR):
+#   #30ff00 = Ensete-containing  |  #d4d41c/#0BEFF1 = Musa-only
+#   #155c03 = Ensete-specific    |  #4c01f8 = cross-genus  |  #Df5286 = EV exclusive
+mk_q <- function(color, ...) list(query = intersects, params = list(...), color = color, active = TRUE)
+
+EV_AED20_MAB.OG_GeneCount_Upset %>%
+  upset(
+    nintersect = 300, scale.intersections = "identity", scale.sets = "identity",
+    point.size = 3.7, line.size = 0.5,
+    sets       = c("EV (Mazia)", "EV (Bedadeti)", "MA", "MB"),
+    mainbar.y.label = "Number of shared\nOrthogroups",
+    sets.x.label = NULL, order.by = "degree",
+    text.scale = c(1.4, 1.4, 1.4, 1.4, 1.4, 1.6),
+    number.angles = 0, keep.order = TRUE,
+    queries = list(
+      mk_q("#30ff00", "EV (Bedadeti)", "EV (Mazia)", "MA", "MB"),
+      mk_q("#30ff00", "EV (Bedadeti)", "MA", "MB"),
+      mk_q("#30ff00", "EV (Bedadeti)", "EV (Mazia)", "MA"),
+      mk_q("#30ff00", "EV (Bedadeti)", "MA"),
+      mk_q("#30ff00", "EV (Mazia)", "MA", "MB"),
+      mk_q("#30ff00", "EV (Mazia)", "EV (Bedadeti)", "MA"),
+      mk_q("#30ff00", "EV (Mazia)", "EV (Bedadeti)", "MB"),
+      mk_q("#30ff00", "EV (Mazia)", "EV (Bedadeti)"),
+      mk_q("#30ff00", "EV (Bedadeti)"),
+      mk_q("#30ff00", "EV (Bedadeti)", "MB"),
+      mk_q("#30ff00", "EV (Mazia)", "MA"),
+      mk_q("#30ff00", "EV (Mazia)", "MB"),
+      mk_q("#30ff00", "EV (Mazia)"),
+      mk_q("#d4d41c", "MA", "MB"),
+      mk_q("#d4d41c", "MA"),
+      mk_q("#d4d41c", "MB"),
+      mk_q("#0BEFF1", "MA", "MB"),
+      mk_q("#0BEFF1", "MA"),
+      mk_q("#0BEFF1", "MB"),
+      mk_q("#155c03", "EV (Bedadeti)", "EV (Mazia)"),
+      mk_q("#155c03", "EV (Bedadeti)"),
+      mk_q("#155c03", "EV (Mazia)"),
+      mk_q("#4c01f8", "EV (Mazia)", "EV (Bedadeti)", "MA", "MB"),
+      mk_q("#4c01f8", "EV (Bedadeti)", "MA", "MB"),
+      mk_q("#4c01f8", "EV (Mazia)", "EV (Bedadeti)", "MB"),
+      mk_q("#4c01f8", "EV (Mazia)", "EV (Bedadeti)"),
+      mk_q("#4c01f8", "EV (Bedadeti)", "MB"),
+      mk_q("#4c01f8", "EV (Mazia)", "EV (Bedadeti)", "MA"),
+      mk_q("#4c01f8", "EV (Mazia)", "MA", "MB"),
+      mk_q("#4c01f8", "EV (Mazia)", "MB"),
+      mk_q("#4c01f8", "EV (Mazia)", "MA"),
+      mk_q("#4c01f8", "EV (Bedadeti)", "MA"),
+      mk_q("#4c01f8", "EV (Bedadeti)"),
+      mk_q("#4c01f8", "EV (Bedadeti)", "EV (Mazia)", "MA"),
+      mk_q("#4c01f8", "EV (Mazia)"),
+      mk_q("#4c01f8", "EV (Bedadeti)", "EV (Mazia)", "MB"),
+      mk_q("#4c01f8", "EV (Bedadeti)", "MB"),
+      mk_q("#4c01f8", "EV (Bedadeti)", "MB", "MA"),
+      mk_q("#Df5286", "EV (Bedadeti)", "EV (Mazia)"),
+      mk_q("#Df5286", "EV (Bedadeti)"),
+      mk_q("#Df5286", "EV (Mazia)")
+    )
+  )
+```
+
+```{r assigned_og_genes}
+# Read full OG-to-gene mapping table; extract first gene per OG per species via separate()
+# NOTE: separate() silently drops genes beyond the first. Use separate_rows() for full lists.
+orthogroups_gene_list <- read.delim(
+  file.path(BASE_DIR, "Orthogroups", "Orthogroups.tsv"), header = TRUE
+)
+
+OG_GeneCount_unfiltered <- read.delim(
+  file.path(BASE_DIR, "Orthogroups", "Orthogroups.GeneCount.tsv"),
+  sep = "\t", header = TRUE
+) %>%
+  dplyr::rename(
+    "MA"     = Musa_acuminata,
+    "MB"     = Musa_balbisiana,
+    "EV_bed" = Ensete_ventricosum_bedadeti,
+    "EV_maz" = Ensete_ventricosum_mazia
+  )
+
+orthogroups_gene_list_max_genes <-
+  OG_GeneCount_unfiltered %>%
+  summarise(
+    Ensete_ventricosum_bedadeti = max(EV_bed),
+    Ensete_ventricosum_mazia    = max(EV_maz),
+    Musa_acuminata              = max(MA),
+    Musa_balbisiana             = max(MB)
+  )
+
+all_assigned_OGsgenes_EV_EG_MABS <-
+  map_dfr(SPECIES_COLS, function(each_species) {
+    orthogroups_gene_list %>%
+      dplyr::select(Orthogroup, all_of(each_species)) %>%
+      separate(each_species, into = "seq.name", sep = ",", extra = "drop") %>%
+      mutate(genome = each_species, seq.name = str_replace_na(seq.name, "")) %>%
+      dplyr::filter(seq.name != "")
+  })
+
+all_assigned_OGsgenes_EV_EG_MABS %>% distinct(genome)
+```
+
+```{r parse_unassigned}
+Orthogroups_UnassignedGenes <- read.delim(
+  file.path(BASE_DIR, "Orthogroups", "Orthogroups_UnassignedGenes.tsv"),
+  header = TRUE, sep = "\t"
+)
+
+Orthogroups_UnassignedGenes_EV_EG_MBS <-
+  map_dfr(SPECIES_COLS, function(each_genome) {
+    Orthogroups_UnassignedGenes %>%
+      select(Orthogroup, all_of(each_genome)) %>%
+      distinct() %>%
+      mutate(genome = each_genome) %>%
+      rename(seq.name = all_of(each_genome)) %>%
+      filter(seq.name != "")
+  })
+
+# Plot: unassigned genes per genome
+GENOME_LEVELS <- c(
+  "Ensete_ventricosum_bedadeti", "Ensete_ventricosum_mazia",
+  "Musa_balbisiana", "Musa_acuminata"
+)
+GENOME_LABELS <- c("EV (Bedadeti)", "EV (Mazia)", "MB", "MA")
+
+Orthogroups_UnassignedGenes_EV_EG_MBS %>%
+  filter(seq.name != "") %>%
+  group_by(genome) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  ggplot(aes(x = factor(genome, levels = GENOME_LEVELS), y = count)) +
+  geom_col(position = "dodge") +
+  scale_x_discrete(breaks = GENOME_LEVELS, labels = GENOME_LABELS) +
+  # Break values are data-derived: observed unassigned gene counts per genome
+  scale_y_continuous(breaks = c(1380, 2398, 3311, 5955, 6418)) +
+  coord_flip() +
+  labs(y = "Number of unassigned orthogroups or genes") +
+  base_theme
+
+ggsave(file.path(venn_dir, "Unassigned_OG_genes.tiff"), width = 7, height = 7)
+```
+
+```{r ortho_type}
+# Load unfiltered gene counts (assigned + unassigned) and classify OG categories
+unfiltered_EV_AED20_MAB.OG_GeneCount <-
+  read.delim(
+    file.path(BASE_DIR, "Orthogroups", "Orthogroups.GeneCount.tsv"),
+    sep = "\t", header = TRUE
+  ) %>%
+  bind_rows(
+    read.delim(file.path(BASE_DIR, "Orthogroups", "Orthogroups_UnassignedGenes.tsv")) %>%
+      binarise_unassigned()
+  )
+
+# Single-copy: exactly one gene copy in every genome (1-to-1 orthology)
+single_copy_orthologs <-
+  unfiltered_EV_AED20_MAB.OG_GeneCount %>%
+  filter(
+    Musa_acuminata == 1, Musa_balbisiana == 1,
+    Ensete_ventricosum_bedadeti == 1, Ensete_ventricosum_mazia == 1
+  ) %>%
+  mutate(single_copy_OGs = "yes")
+
+# Helper: build single-genome filter conditions (two thresholds: == 1 or > 1)
+filter_solo_genome <- function(focal_col, op = `==`, threshold = 1) {
+  other_cols <- setdiff(SPECIES_COLS, focal_col)
+  unfiltered_EV_AED20_MAB.OG_GeneCount %>%
+    exclude_single_copy() %>%
+    filter(op(.data[[focal_col]], threshold)) %>%
+    filter(if_all(all_of(other_cols), ~ . == 0))
+}
+
+# Unassigned: present with exactly one copy in exactly one genome
+unassigned_OGs <-
+  bind_rows(lapply(SPECIES_COLS, filter_solo_genome, op = `==`, threshold = 1)) %>%
+  mutate(unassigned_OG = "yes") %>%
+  select(-single_copy_OGs)
+
+# Unique: genome-specific with more than one gene copy (expanded families)
+unique_OGs <-
+  bind_rows(lapply(SPECIES_COLS, filter_solo_genome, op = `>`, threshold = 1)) %>%
+  mutate(unique_OGs = "yes") %>%
+  select(-single_copy_OGs)
+
+# Multi-copy: everything not captured by the three categories above
+multi_copy_OGs <-
+  unfiltered_EV_AED20_MAB.OG_GeneCount %>%
+  left_join(single_copy_orthologs, by = "Orthogroup") %>%
+  left_join(unique_OGs,            by = "Orthogroup") %>%
+  left_join(unassigned_OGs,        by = "Orthogroup") %>%
+  mutate(across(c(single_copy_OGs, unique_OGs, unassigned_OG), ~ str_replace_na(., "NA"))) %>%
+  filter(single_copy_OGs == "NA", unique_OGs == "NA", unassigned_OG == "NA") %>%
+  distinct() %>%
+  select(-single_copy_OGs, -unique_OGs, -unassigned_OG, -Total)
+
+multi_single_unique_unassigned_OG_summary <-
+  bind_rows(
+    summarise_og_genes(multi_copy_OGs,       "Multi-copy orthologs"),
+    summarise_og_genes(single_copy_orthologs, "Single-copy orthologs"),
+    summarise_og_genes(unique_OGs,            "Unique"),
+    summarise_og_genes(unassigned_OGs,        "Unassigned")
+  )
+```
+
+```{r all_ogs}
+# Label each count column with genome shortname by category, then stack all categories.
+# case_when() with no TRUE ~ fallback returns NA_character_ for unmatched rows — intentional here,
+# as downstream filter(value != "NA") removes unmatched entries after pivot_longer().
+label_genomes <- function(df, threshold_expr) {
+  df %>% mutate(
+    Ensete_ventricosum_bedadeti = case_when(threshold_expr(Ensete_ventricosum_bedadeti) ~ "bedadeti"),
+    Ensete_ventricosum_mazia    = case_when(threshold_expr(Ensete_ventricosum_mazia)    ~ "mazia"),
+    Musa_acuminata              = case_when(threshold_expr(Musa_acuminata)              ~ "musa_ac"),
+    Musa_balbisiana             = case_when(threshold_expr(Musa_balbisiana)             ~ "musa_ba")
+  )
+}
+
+assigned_unassigned_OGs_EV_EG_MABS <-
+  bind_rows(
+    label_genomes(multi_copy_OGs,       function(x) x > 1),
+    label_genomes(unique_OGs,           function(x) x >= 1),
+    label_genomes(unassigned_OGs,       function(x) x == 1),
+    label_genomes(single_copy_orthologs, function(x) x == 1)
+  )
+
+assigned_unassigned_OGs_EV_EG_MABS_v1 <-
+  assigned_unassigned_OGs_EV_EG_MABS %>%
+  pivot_longer(cols = Musa_acuminata:Ensete_ventricosum_mazia, values_to = "value") %>%
+  select(Orthogroup, name, value) %>%
+  mutate(value = str_replace_na(value, "NA")) %>%
+  filter(value != "NA") %>%
+  distinct()
+
+# Verify a specific OG for manual inspection
+EV_AED20_MAB.OG_GeneCount %>% filter(Orthogroup == "OG0016389")
+
+# Parse the flat space-delimited OG gene list; tag each gene with its genome of origin:
+#   EVBD -> EV Bedadeti  |  EVMZ -> EV Mazia  |  Mba -> M. balbisiana  |  Macma -> M. acuminata
+assigned_unassigned_OGs_genes_EV_EG_MAB <-
+  read.delim(
+    file.path(BASE_DIR, "Orthogroups", "Orthogroups.txt"),
+    sep = " ", header = FALSE
+  ) %>%
+  pivot_longer(cols = -V1, values_to = "seq.name") %>%
+  mutate(
+    V1     = str_remove(V1, ":"),
+    genome = case_when(
+      str_detect(seq.name, "EVBD")  ~ "bedadeti",
+      str_detect(seq.name, "EVMZ")  ~ "mazia",
+      str_detect(seq.name, "Mba")   ~ "musa_ba",
+      str_detect(seq.name, "Macma") ~ "musa_ac"
+    )
+  ) %>%
+  rename(Orthogroup = V1) %>%
+  select(Orthogroup, seq.name, genome) %>%
+  mutate(genome = str_replace_na(genome, "NA")) %>%
+  filter(genome != "NA") %>%
+  bind_rows(Orthogroups_UnassignedGenes_EV_EG_MBS)
+
+assigned_unassigned_OGs_genes_EV_EG_MAB %>% tail()
+```
+
+```{r plot_og_summary}
+SPECIES_DISPLAY <- c(
+  "Ensete_ventricosum_bedadeti" = "*E. ventricosum* (Bedadeti)",
+  "Ensete_ventricosum_mazia"    = "*E. ventricosum* (Mazia)",
+  "Musa_balbisiana"             = "*M. balbisiana*",
+  "Musa_acuminata"              = "*M. acuminata*"
+)
+
+multi_single_unique_unassigned_OG_summary %>%
+  mutate(name = str_replace_all(name, SPECIES_DISPLAY)) %>%
+  mutate(name = factor(name, levels = unname(SPECIES_DISPLAY)[c(2, 1, 3, 4)])) %>%
+  ggplot(aes(name, value, fill = Orthogroup)) +
+  geom_col() +
+  coord_flip() +
+  labs(y = "Number of genes") +
+  base_theme +
+  theme(
+    legend.text     = element_markdown(size = 10.8),
+    legend.key.size = unit(0.2, "cm"),
+    legend.position = "top"
+  )
+
+ggsave(file.path(BASE_DIR, "OG_EV_MAB_summary.tiff"), width = 7, height = 4)
+```
+
+```{r save}
+save.image(file = file.path(BASE_DIR, "OrthoFinder.EV.MAB.RData"), compress = TRUE)
+```

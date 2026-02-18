@@ -1,0 +1,103 @@
+name: ev_mab_compgeno
+
+# Conda channels (searched in order)
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Genome QC & profiling
+  - jellyfish=2.3.0
+  - genomescope2
+  - smudgeplotter=0.3.0
+  - busco=5.2.1
+  # NOTE: gfastats and FastK/PloidyPlot require manual installation.
+  # See https://github.com/vgl-hub/gfastats and https://github.com/thegenemyers/FASTK
+  # NOTE: FindGSE must be installed from R: install.packages("FindGSE")
+  # NOTE: stLFRdenovo requires manual installation from https://github.com/BGI-Qingdao/stLFRdenovo
+
+  # Repeat identification
+  - repeatmasker=4.1.1
+  - repeatmodeler=2.0.1
+  - cd-hit=4.8.1
+  - bedtools=2.30.0
+  - tesorter=1.4
+  - trf              # Tandem Repeat Finder
+  - muscle           # Required for PILER alignment step
+  # NOTE: MITE-Hunter requires manual installation from https://github.com/jinfeiyang/MITE-Hunter
+  # NOTE: PILER requires manual installation from https://www.drive5.com/piler/
+  # NOTE: EDTA can be installed via conda: conda install -c bioconda edta
+
+  # Read QC
+  - trim-galore=0.6.7
+  - fastqc=0.11.9
+  - cutadapt=4.3
+
+  # Read mapping
+  - bwa-mem2=2.2.1
+  - minimap2=2.24
+  - samtools=1.22
+  - picard=2.27.1
+
+  # Gene prediction
+  - hisat2=2.1.0
+  - augustus=3.4.0
+  - snap
+  # NOTE: BRAKER2 and GeneMark-ETP require separate licenced installation.
+  # See https://github.com/Gaius-Augustus/BRAKER
+  # NOTE: MAKER and PASA require manual installation.
+
+  # Transcript assembly and quantification
+  - trinity=2.1.1
+  - stringtie          # RNA-seq transcript assembly / quantification (hisat2.sh)
+
+  # ncRNA annotation
+  - trnascan-se=2.0.9
+  - infernal=1.1.4
+
+  # Functional annotation
+  - diamond=2.0.15
+  - eggnog-mapper=2.1.7
+  # NOTE: InterProScan requires standalone installation.
+  # See https://interproscan-docs.readthedocs.io for instructions.
+
+  # Comparative genomics
+  - mummer4=4.0.0      # provides nucmer, show-coords (pav_analysis.py)
+  - lastz               # CDS alignment fallback (pav_analysis.py)
+  - bedops              # provides gff2bed (00_prep_data.sh)
+  - sra-tools           # provides fasterq-dump (01_readsCDS_PAV_analysis.sh)
+  - qualimap=2.2.2
+  - deeptools           # provides bamCoverage (01_readsCDS_PAV_analysis.sh)
+
+  # NLR analysis
+  - blast=2.14.1   # makeblastdb, tblastn, tblastx (NLR_loci_vs_NLR_genes.sh; blastx in repeat analysis)
+  - hmmer=3.3.2
+  - meme           # Provides MAST and FIMO
+  # NOTE: NLR-Annotator requires manual installation from https://github.com/steuernb/NLR-Annotator
+
+  # Orthology & structure
+  - orthofinder=2.5.5
+  - foldseek
+  - clustalo=1.2.1
+  - trimal=1.4.1
+  - raxml=8.2.12
+  # NOTE: AlphaFold2 requires a separate GPU installation.
+  # See https://github.com/deepmind/alphafold
+
+  # Python packages
+  - python>=3.9
+  - pandas>=1.5.0
+  - pybedtools>=0.9.0
+  - pysam>=0.20.0
+  - matplotlib
+  - numpy
+
+  # R and Bioconductor packages
+  - r-base>=4.1
+  - r-tidyverse
+  - bioconductor-karyoploter
+  - bioconductor-clusterprofiler
+  # NOTE: ggcoverage may not be available on conda-forge.
+  # Install from R: remotes::install_github("showteeth/ggcoverage")
+  # NOTE: FindGSE must be installed from R: install.packages("FindGSE")
